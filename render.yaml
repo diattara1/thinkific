@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: thinkific-paytech-app
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: APP_BASE_URL
+        sync: false
+      - key: PUBLIC_SITE_NAME
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: thinkific-paytech-db
+          property: connectionString
+      - key: PAYTECH_API_KEY
+        sync: false
+      - key: PAYTECH_API_SECRET
+        sync: false
+      - key: PAYTECH_ENV
+        value: test
+      - key: PAYTECH_TARGET_PAYMENT
+        sync: false
+      - key: THINKIFIC_API_KEY
+        sync: false
+      - key: THINKIFIC_SUBDOMAIN
+        sync: false
+      - key: THINKIFIC_SEND_WELCOME_EMAIL
+        value: true
+      - key: SUCCESS_REDIRECT_URL
+        sync: false
+      - key: CANCEL_REDIRECT_URL
+        sync: false
+
+databases:
+  - name: thinkific-paytech-db
+    plan: free
