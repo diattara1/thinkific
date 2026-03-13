@@ -65,7 +65,13 @@ async function findActiveProductBySlug(slug) {
   );
   return result.rows[0] || null;
 }
-
+async function findActiveProductByCourseId(courseId) {
+  const result = await query(
+    `SELECT * FROM products WHERE thinkific_course_id = $1 AND active = TRUE LIMIT 1`,
+    [courseId]
+  );
+  return result.rows[0] || null;
+}
 async function findApplicableCoupon(code, productId) {
   if (!code) return null;
   const result = await query(
@@ -142,6 +148,7 @@ function renderCheckoutPage(product, coupon, message = '') {
     ${msg}
     <form method="post" action="/checkout">
       <input type="hidden" name="product_slug" value="${escapeHtml(product.slug)}" />
+      <input type="hidden" name="product_course_id" value="${product.thinkific_course_id}" />
       <div class="row">
         <div>
           <label>Prénom</label>
@@ -172,24 +179,39 @@ app.get('/health', async (req, res) => {
 });
 
 app.get('/pay', async (req, res) => {
-  const { product: productSlug, coupon: couponCode } = req.query;
-  if (!productSlug) return res.status(400).send('Paramètre product manquant');
 
-  const product = await findActiveProductBySlug(productSlug);
-  if (!product) return res.status(404).send('Produit introuvable');
+  const { product: courseId, coupon: couponCode } = req.query;
 
-  const coupon = couponCode ? await findApplicableCoupon(couponCode, product.id) : null;
+  if (!courseId)
+    return res.status(400).send('Paramètre product manquant');
+
+  const product = await findActiveProductByCourseId(courseId);
+
+  if (!product)
+    return res.status(404).send('Produit introuvable');
+
+  const coupon = couponCode
+    ? await findApplicableCoupon(couponCode, product.id)
+    : null;
+
   return res.status(200).send(renderCheckoutPage(product, coupon));
+
 });
 
 app.post('/checkout', async (req, res) => {
-  const { product_slug, email, first_name, last_name, phone, coupon_code } = req.body;
+  const { product_slug, product_course_id, email, first_name, last_name, phone, coupon_code } = req.body;
 
   if (!product_slug || !email || !first_name || !last_name) {
     return res.status(400).send('Champs obligatoires manquants');
   }
 
-  const product = await findActiveProductBySlug(product_slug);
+  let product;
+
+  if (product_course_id) {
+    product = await findActiveProductByCourseId(product_course_id);
+  } else {
+    product = await findActiveProductBySlug(product_slug);
+  }
   if (!product) return res.status(404).send('Produit introuvable');
 
   const coupon = coupon_code ? await findApplicableCoupon(coupon_code, product.id) : null;
