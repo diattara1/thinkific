@@ -186,7 +186,8 @@ app.get('/pay', async (req, res) => {
     coupon: couponCode,
     email,
     first_name,
-    last_name
+    last_name,
+    phone
   } = req.query;
 
   if (!courseId)
@@ -200,6 +201,85 @@ app.get('/pay', async (req, res) => {
   const coupon = couponCode
     ? await findApplicableCoupon(couponCode, product.id)
     : null;
+
+  const shouldAutoRedirect = Boolean(email && first_name && last_name);
+
+  if (shouldAutoRedirect) {
+    const finalPrice = computeFinalPrice(product.price_cents, coupon);
+    const orderRef = buildOrderRef(product.slug);
+
+    const customField = {
+      order_ref: orderRef,
+      product_slug: product.slug,
+      thinkific_course_id: product.thinkific_course_id,
+      email,
+      first_name,
+      last_name,
+      phone: phone || null,
+      coupon_code: coupon?.code || null,
+    };
+
+    const payload = {
+      item_name: product.title,
+      item_price: finalPrice,
+      ref_command: orderRef,
+      command_name: `Achat ${product.title}`,
+      currency: product.currency,
+      env: PAYTECH_ENV,
+      ipn_url: `${APP_BASE_URL}/paytech/ipn`,
+      success_url: `${SUCCESS_REDIRECT_URL}?order_ref=${encodeURIComponent(orderRef)}`,
+      cancel_url: `${CANCEL_REDIRECT_URL}?order_ref=${encodeURIComponent(orderRef)}`,
+      custom_field: JSON.stringify(customField),
+    };
+
+    if (PAYTECH_TARGET_PAYMENT) payload.target_payment = PAYTECH_TARGET_PAYMENT;
+
+    try {
+      const paytechResp = await axios.post(paytechRequestUrl(), payload, {
+        headers: {
+          'API_KEY': PAYTECH_API_KEY,
+          'API_SECRET': PAYTECH_API_SECRET,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000,
+      });
+
+      const redirectUrl = extractPaytechRedirectUrl(paytechResp.data);
+      const token = extractPaytechToken(paytechResp.data);
+
+      if (!redirectUrl) {
+        return res.status(502).send(`Réponse PayTech inattendue: ${JSON.stringify(paytechResp.data)}`);
+      }
+
+      await query(
+        `INSERT INTO orders
+          (order_ref, paytech_token, product_id, customer_email, customer_first_name, customer_last_name, customer_phone, coupon_code, base_price_cents, final_price_cents, currency, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending')`,
+        [
+          orderRef,
+          token,
+          product.id,
+          email,
+          first_name,
+          last_name,
+          phone || null,
+          coupon?.code || null,
+          product.price_cents,
+          finalPrice,
+          product.currency,
+        ]
+      );
+
+      return res.redirect(302, redirectUrl);
+    } catch (error) {
+      const message = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+      return res.status(500).send(renderCheckoutPage(product, coupon, `Erreur PayTech: ${message}`, {
+        email,
+        first_name,
+        last_name,
+      }));
+    }
+  }
 
   return res.status(200).send(
     renderCheckoutPage(
