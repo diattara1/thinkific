@@ -180,10 +180,11 @@ app.get('/health', async (req, res) => {
 
 app.get('/pay', async (req, res) => {
 
-  const { product: courseId, coupon: couponCode } = req.query;
+  const courseId = Number(req.query.product);
+  const { coupon: couponCode } = req.query;
 
   if (!courseId)
-    return res.status(400).send('Paramètre product manquant');
+    return res.status(400).send('Param�tre product invalide');
 
   const product = await findActiveProductByCourseId(courseId);
 
@@ -399,7 +400,9 @@ async function markOrderCancelled({ orderRef, payload }) {
 }
 
 app.post('/paytech/ipn', async (req, res) => {
-  const payload = req.body || {};
+  const payload = typeof req.body === "string"
+    ? JSON.parse(req.body)
+    : req.body || {};
   await query(`INSERT INTO webhook_logs (provider, payload) VALUES ('paytech', $1)`, [payload]);
 
   const sentApiKeySha = payload.api_key_sha256;
@@ -477,9 +480,12 @@ app.post('/paytech/ipn', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(PUBLIC_SITE_NAME)}</title></head><body><h1>${escapeHtml(PUBLIC_SITE_NAME)}</h1><p>Service de paiement actif.</p><p>Utilisez <code>/pay?product=formation-ia</code></p></body></html>`);
+  res.send(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(PUBLIC_SITE_NAME)}</title></head><body><h1>${escapeHtml(PUBLIC_SITE_NAME)}</h1><p>Service de paiement actif.</p><p>Utilisez <code>/pay?product=COURSE_ID</code></p></body></html>`);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Serveur démarré sur le port ${PORT}`);
 });
+
+
+
