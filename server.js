@@ -116,7 +116,7 @@ function extractPaytechToken(data) {
   return data?.token || data?.payment_token || data?.data?.token || null;
 }
 
-function renderCheckoutPage(product, coupon, message = '') {
+function renderCheckoutPage(product, coupon, message = '', user = {}) {
   const base = product.price_cents;
   const final = computeFinalPrice(base, coupon);
   const promo = coupon ? `<p><strong>Coupon:</strong> ${escapeHtml(coupon.code)}</p>` : '';
@@ -152,15 +152,15 @@ function renderCheckoutPage(product, coupon, message = '') {
       <div class="row">
         <div>
           <label>Prénom</label>
-          <input name="first_name" required />
+          <input name="first_name" value="${escapeHtml(user.first_name || '')}" required />
         </div>
         <div>
           <label>Nom</label>
-          <input name="last_name" required />
+          <input name="last_name" value="${escapeHtml(user.last_name || '')}" required />
         </div>
       </div>
       <label>Email</label>
-      <input type="email" name="email" required />
+      <input type="email" name="email" value="${escapeHtml(user.email || '')}" readonly required />
       <label>Téléphone (ex: 22177xxxxxxx)</label>
       <input name="phone" />
       <label>Code promo</label>
@@ -181,10 +181,16 @@ app.get('/health', async (req, res) => {
 app.get('/pay', async (req, res) => {
 
   const courseId = Number(req.query.product);
-  const { coupon: couponCode } = req.query;
+
+  const {
+    coupon: couponCode,
+    email,
+    first_name,
+    last_name
+  } = req.query;
 
   if (!courseId)
-    return res.status(400).send('Param�tre product invalide');
+    return res.status(400).send('Paramètre product invalide');
 
   const product = await findActiveProductByCourseId(courseId);
 
@@ -195,7 +201,18 @@ app.get('/pay', async (req, res) => {
     ? await findApplicableCoupon(couponCode, product.id)
     : null;
 
-  return res.status(200).send(renderCheckoutPage(product, coupon));
+  return res.status(200).send(
+    renderCheckoutPage(
+      product,
+      coupon,
+      '',
+      {
+        email,
+        first_name,
+        last_name
+      }
+    )
+  );
 
 });
 
