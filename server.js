@@ -116,6 +116,11 @@ function extractPaytechToken(data) {
   return data?.token || data?.payment_token || data?.data?.token || null;
 }
 
+function buildCancelRedirectUrl(productSlug) {
+  const base = String(CANCEL_REDIRECT_URL || '').replace(/\/+$/, '');
+  return `${base}/${encodeURIComponent(productSlug)}`;
+}
+
 function renderCheckoutPage(product, coupon, message = '', user = {}) {
   const base = product.price_cents;
   const final = computeFinalPrice(base, coupon);
@@ -228,7 +233,7 @@ app.get('/pay', async (req, res) => {
       env: PAYTECH_ENV,
       ipn_url: `${APP_BASE_URL}/paytech/ipn`,
       success_url: `${SUCCESS_REDIRECT_URL}`,
-      cancel_url: `${CANCEL_REDIRECT_URL}?order_ref=${encodeURIComponent(orderRef)}`,
+      cancel_url: buildCancelRedirectUrl(product.slug),
       custom_field: JSON.stringify(customField),
     };
 
@@ -336,7 +341,7 @@ app.post('/checkout', async (req, res) => {
     env: PAYTECH_ENV,
     ipn_url: `${APP_BASE_URL}/paytech/ipn`,
     success_url: `${SUCCESS_REDIRECT_URL}?order_ref=${encodeURIComponent(orderRef)}`,
-    cancel_url: `${CANCEL_REDIRECT_URL}?order_ref=${encodeURIComponent(orderRef)}`,
+    cancel_url: buildCancelRedirectUrl(product.slug),
     custom_field: JSON.stringify(customField),
   };
 
