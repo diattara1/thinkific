@@ -587,15 +587,13 @@ app.get('/', (req, res) => {
 
 // ─── ADMIN ────────────────────────────────────────────────────────────────────
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
-
 function adminAuth(req, res, next) {
   const auth = req.headers.authorization || '';
   const [scheme, encoded] = auth.split(' ');
   if (scheme === 'Basic' && encoded) {
     const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-    const [, pass] = decoded.split(':');
-    if (pass === ADMIN_PASSWORD) return next();
+    const [user, pass] = decoded.split(':');
+    if (user === 'admin' && pass === 'admin') return next();
   }
   res.set('WWW-Authenticate', 'Basic realm="Admin"');
   return res.status(401).send('Accès refusé');
