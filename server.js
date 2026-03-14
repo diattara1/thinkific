@@ -582,7 +582,450 @@ app.post('/paytech/ipn', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(PUBLIC_SITE_NAME)}</title></head><body><h1>${escapeHtml(PUBLIC_SITE_NAME)}</h1><p>Service de paiement actif.</p><p>Utilisez <code>/pay?product=COURSE_ID</code></p></body></html>`);
+  res.send(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(PUBLIC_SITE_NAME)}</title></head><body><h1>${escapeHtml(PUBLIC_SITE_NAME)}</h1><p>Service de paiement actif.</p><p>Utilisez <code>/pay?product=COURSE_ID</code></p><p><a href="/admin">Administration</a></p></body></html>`);
+});
+
+// ─── ADMIN ────────────────────────────────────────────────────────────────────
+
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+
+function adminAuth(req, res, next) {
+  const auth = req.headers.authorization || '';
+  const [scheme, encoded] = auth.split(' ');
+  if (scheme === 'Basic' && encoded) {
+    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+    const [, pass] = decoded.split(':');
+    if (pass === ADMIN_PASSWORD) return next();
+  }
+  res.set('WWW-Authenticate', 'Basic realm="Admin"');
+  return res.status(401).send('Accès refusé');
+}
+
+const ADMIN_CSS = `
+  *{box-sizing:border-box}
+  body{font-family:system-ui,Arial,sans-serif;background:#f1f5f9;margin:0;color:#1e293b}
+  nav{background:#1e293b;color:#fff;padding:12px 24px;display:flex;gap:24px;align-items:center}
+  nav a{color:#94a3b8;text-decoration:none;font-size:14px}
+  nav a:hover,nav a.active{color:#fff}
+  nav .brand{color:#fff;font-weight:700;font-size:16px;margin-right:auto}
+  .container{max-width:1100px;margin:0 auto;padding:24px}
+  h1{font-size:22px;margin:0 0 20px}
+  .card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:24px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;padding:10px 12px;border-bottom:2px solid #e2e8f0;color:#64748b;font-weight:600;white-space:nowrap}
+  td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  tr:hover td{background:#fafafa}
+  .badge{display:inline-block;padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:600}
+  .badge-green{background:#dcfce7;color:#166534}
+  .badge-yellow{background:#fef9c3;color:#854d0e}
+  .badge-red{background:#fee2e2;color:#991b1b}
+  .badge-blue{background:#dbeafe;color:#1d4ed8}
+  .badge-gray{background:#f1f5f9;color:#475569}
+  input,select,textarea{padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;width:100%}
+  input:focus,select:focus,textarea:focus{outline:2px solid #3b82f6;border-color:transparent}
+  .btn{display:inline-block;padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:14px;font-weight:600;text-decoration:none}
+  .btn-primary{background:#1e293b;color:#fff}
+  .btn-primary:hover{background:#0f172a}
+  .btn-danger{background:#ef4444;color:#fff}
+  .btn-danger:hover{background:#dc2626}
+  .btn-sm{padding:5px 10px;font-size:12px}
+  .btn-outline{background:transparent;border:1px solid #cbd5e1;color:#475569}
+  .btn-outline:hover{background:#f8fafc}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .form-group{margin-bottom:14px}
+  .form-group label{display:block;font-size:13px;font-weight:600;color:#475569;margin-bottom:4px}
+  .stat{text-align:center;padding:16px}
+  .stat .val{font-size:32px;font-weight:800;color:#1e293b}
+  .stat .lbl{font-size:13px;color:#64748b;margin-top:4px}
+  .alert{padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:14px}
+  .alert-success{background:#dcfce7;color:#166534}
+  .alert-error{background:#fee2e2;color:#991b1b}
+  .actions{display:flex;gap:8px;flex-wrap:wrap}
+  .edit-row{display:none;background:#fffbeb}
+  @media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr}}
+`;
+
+function adminNav(active) {
+  return `<nav>
+    <span class="brand">⚙ Admin</span>
+    <a href="/admin" class="${active==='dashboard'?'active':''}">Tableau de bord</a>
+    <a href="/admin/products" class="${active==='products'?'active':''}">Produits</a>
+    <a href="/admin/coupons" class="${active==='coupons'?'active':''}">Coupons</a>
+    <a href="/admin/orders" class="${active==='orders'?'active':''}">Commandes</a>
+  </nav>`;
+}
+
+function adminPage(title, active, body) {
+  return `<!doctype html><html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(title)} – Admin</title>
+<style>${ADMIN_CSS}</style></head>
+<body>
+${adminNav(active)}
+<div class="container">
+<h1>${escapeHtml(title)}</h1>
+${body}
+</div>
+</body></html>`;
+}
+
+function statusBadge(status) {
+  const map = {
+    pending: ['badge-yellow', 'En attente'],
+    paid: ['badge-blue', 'Payé'],
+    enrolled: ['badge-green', 'Inscrit'],
+    cancelled: ['badge-gray', 'Annulé'],
+    failed: ['badge-red', 'Échoué'],
+  };
+  const [cls, label] = map[status] || ['badge-gray', status];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// Dashboard
+app.get('/admin', adminAuth, async (_req, res) => {
+  const [ordersRes, productsRes, couponsRes, revenueRes] = await Promise.all([
+    query(`SELECT COUNT(*) FROM orders`),
+    query(`SELECT COUNT(*) FROM products WHERE active=TRUE`),
+    query(`SELECT COUNT(*) FROM coupons WHERE active=TRUE`),
+    query(`SELECT COALESCE(SUM(final_price_cents),0) AS total FROM orders WHERE status IN ('paid','enrolled')`),
+  ]);
+  const recentOrders = await query(
+    `SELECT o.order_ref, o.customer_email, o.customer_first_name, o.customer_last_name,
+            o.final_price_cents, o.currency, o.status, o.created_at, p.title AS product_title
+     FROM orders o JOIN products p ON p.id=o.product_id
+     ORDER BY o.created_at DESC LIMIT 10`
+  );
+
+  const total = Number(revenueRes.rows[0].total);
+  const body = `
+  <div class="card">
+    <div class="grid3">
+      <div class="stat"><div class="val">${ordersRes.rows[0].count}</div><div class="lbl">Commandes</div></div>
+      <div class="stat"><div class="val">${productsRes.rows[0].count}</div><div class="lbl">Produits actifs</div></div>
+      <div class="stat"><div class="val">${couponsRes.rows[0].count}</div><div class="lbl">Coupons actifs</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="stat"><div class="val">${total.toLocaleString('fr-FR')} FCFA</div><div class="lbl">Revenus (payé + inscrit)</div></div>
+  </div>
+  <div class="card">
+    <h2 style="font-size:16px;margin:0 0 16px">Dernières commandes</h2>
+    <table>
+      <thead><tr><th>Réf</th><th>Client</th><th>Produit</th><th>Montant</th><th>Statut</th><th>Date</th></tr></thead>
+      <tbody>
+      ${recentOrders.rows.map(o => `<tr>
+        <td><code style="font-size:11px">${escapeHtml(o.order_ref)}</code></td>
+        <td>${escapeHtml(o.customer_first_name)} ${escapeHtml(o.customer_last_name)}<br><small style="color:#64748b">${escapeHtml(o.customer_email)}</small></td>
+        <td>${escapeHtml(o.product_title)}</td>
+        <td>${Number(o.final_price_cents).toLocaleString('fr-FR')} ${escapeHtml(o.currency)}</td>
+        <td>${statusBadge(o.status)}</td>
+        <td style="white-space:nowrap;font-size:12px">${new Date(o.created_at).toLocaleString('fr-FR')}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+
+  res.send(adminPage('Tableau de bord', 'dashboard', body));
+});
+
+// ── PRODUCTS ──────────────────────────────────────────────────────────────────
+
+app.get('/admin/products', adminAuth, async (req, res) => {
+  const flash = req.query.flash ? `<div class="alert alert-success">${escapeHtml(req.query.flash)}</div>` : '';
+  const products = await query(`SELECT * FROM products ORDER BY created_at DESC`);
+
+  const rows = products.rows.map(p => `
+    <tr id="row-${p.id}">
+      <td>${escapeHtml(p.slug)}</td>
+      <td>${escapeHtml(p.title)}</td>
+      <td>${escapeHtml(String(p.thinkific_course_id))}</td>
+      <td>${Number(p.price_cents).toLocaleString('fr-FR')} ${escapeHtml(p.currency)}</td>
+      <td>${p.active ? '<span class="badge badge-green">Actif</span>' : '<span class="badge badge-gray">Inactif</span>'}</td>
+      <td class="actions">
+        <button class="btn btn-outline btn-sm" onclick="toggleEdit(${p.id})">Éditer</button>
+        <form method="post" action="/admin/products/${p.id}/toggle" style="display:inline" onsubmit="return confirm('Confirmer ?')">
+          <button class="btn btn-sm ${p.active ? 'btn-danger' : 'btn-primary'}">${p.active ? 'Désactiver' : 'Activer'}</button>
+        </form>
+      </td>
+    </tr>
+    <tr class="edit-row" id="edit-${p.id}">
+      <td colspan="6">
+        <form method="post" action="/admin/products/${p.id}" style="padding:12px">
+          <div class="grid3">
+            <div class="form-group"><label>Slug</label><input name="slug" value="${escapeHtml(p.slug)}" required></div>
+            <div class="form-group"><label>Titre</label><input name="title" value="${escapeHtml(p.title)}" required></div>
+            <div class="form-group"><label>Course ID Thinkific</label><input name="thinkific_course_id" value="${escapeHtml(String(p.thinkific_course_id))}" required></div>
+          </div>
+          <div class="grid3">
+            <div class="form-group"><label>Prix (centimes)</label><input type="number" name="price_cents" value="${p.price_cents}" required></div>
+            <div class="form-group"><label>Devise</label><input name="currency" value="${escapeHtml(p.currency)}" required></div>
+            <div class="form-group"><label>Description</label><input name="description" value="${escapeHtml(p.description || '')}"></div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" type="submit">Enregistrer</button>
+            <button class="btn btn-outline" type="button" onclick="toggleEdit(${p.id})">Annuler</button>
+          </div>
+        </form>
+      </td>
+    </tr>`).join('');
+
+  const body = `
+  ${flash}
+  <div class="card">
+    <h2 style="font-size:16px;margin:0 0 16px">Nouveau produit</h2>
+    <form method="post" action="/admin/products">
+      <div class="grid3">
+        <div class="form-group"><label>Slug (ex: formation-ia)</label><input name="slug" required placeholder="formation-ia"></div>
+        <div class="form-group"><label>Titre</label><input name="title" required placeholder="Formation IA"></div>
+        <div class="form-group"><label>Course ID Thinkific</label><input name="thinkific_course_id" required placeholder="123456"></div>
+      </div>
+      <div class="grid3">
+        <div class="form-group"><label>Prix (centimes, ex: 10000)</label><input type="number" name="price_cents" required placeholder="10000"></div>
+        <div class="form-group"><label>Devise</label><input name="currency" value="XOF" required></div>
+        <div class="form-group"><label>Description</label><input name="description" placeholder="Optionnel"></div>
+      </div>
+      <button class="btn btn-primary" type="submit">Créer le produit</button>
+    </form>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Slug</th><th>Titre</th><th>Course ID</th><th>Prix</th><th>Statut</th><th>Actions</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <script>
+    function toggleEdit(id) {
+      const row = document.getElementById('edit-'+id);
+      row.style.display = row.style.display === 'table-row' ? 'none' : 'table-row';
+    }
+  </script>`;
+
+  res.send(adminPage('Produits', 'products', body));
+});
+
+app.post('/admin/products', adminAuth, async (req, res) => {
+  const { slug, title, thinkific_course_id, price_cents, currency, description } = req.body;
+  await query(
+    `INSERT INTO products (slug, title, thinkific_course_id, price_cents, currency, description, active)
+     VALUES ($1,$2,$3,$4,$5,$6,TRUE)`,
+    [slug.trim(), title.trim(), Number(thinkific_course_id), Number(price_cents), (currency || 'XOF').trim(), description?.trim() || null]
+  );
+  res.redirect('/admin/products?flash=Produit+créé');
+});
+
+app.post('/admin/products/:id', adminAuth, async (req, res) => {
+  const { slug, title, thinkific_course_id, price_cents, currency, description } = req.body;
+  await query(
+    `UPDATE products SET slug=$1, title=$2, thinkific_course_id=$3, price_cents=$4, currency=$5, description=$6 WHERE id=$7`,
+    [slug.trim(), title.trim(), Number(thinkific_course_id), Number(price_cents), (currency || 'XOF').trim(), description?.trim() || null, req.params.id]
+  );
+  res.redirect('/admin/products?flash=Produit+mis+à+jour');
+});
+
+app.post('/admin/products/:id/toggle', adminAuth, async (req, res) => {
+  await query(`UPDATE products SET active = NOT active WHERE id=$1`, [req.params.id]);
+  res.redirect('/admin/products?flash=Statut+modifié');
+});
+
+// ── COUPONS ───────────────────────────────────────────────────────────────────
+
+app.get('/admin/coupons', adminAuth, async (req, res) => {
+  const flash = req.query.flash ? `<div class="alert alert-success">${escapeHtml(req.query.flash)}</div>` : '';
+  const coupons = await query(`SELECT * FROM coupons ORDER BY created_at DESC`);
+
+  const rows = coupons.rows.map(c => {
+    const starts = c.starts_at ? new Date(c.starts_at).toLocaleDateString('fr-FR') : '–';
+    const ends = c.ends_at ? new Date(c.ends_at).toLocaleDateString('fr-FR') : '–';
+    const usage = c.max_uses ? `${c.current_uses}/${c.max_uses}` : `${c.current_uses}/∞`;
+    const discount = c.discount_type === 'percent' ? `${c.discount_value}%` : `${Number(c.discount_value).toLocaleString('fr-FR')} FCFA`;
+
+    const toInputDate = (d) => d ? new Date(d).toISOString().slice(0,10) : '';
+    return `
+    <tr id="row-${c.id}">
+      <td><strong>${escapeHtml(c.code)}</strong></td>
+      <td>${discount}</td>
+      <td>${starts} → ${ends}</td>
+      <td>${usage}</td>
+      <td>${c.active ? '<span class="badge badge-green">Actif</span>' : '<span class="badge badge-gray">Inactif</span>'}</td>
+      <td class="actions">
+        <button class="btn btn-outline btn-sm" onclick="toggleEdit(${c.id})">Éditer</button>
+        <form method="post" action="/admin/coupons/${c.id}/toggle" style="display:inline" onsubmit="return confirm('Confirmer ?')">
+          <button class="btn btn-sm ${c.active ? 'btn-danger' : 'btn-primary'}">${c.active ? 'Désactiver' : 'Activer'}</button>
+        </form>
+      </td>
+    </tr>
+    <tr class="edit-row" id="edit-${c.id}">
+      <td colspan="6">
+        <form method="post" action="/admin/coupons/${c.id}" style="padding:12px">
+          <div class="grid3">
+            <div class="form-group"><label>Code</label><input name="code" value="${escapeHtml(c.code)}" required></div>
+            <div class="form-group"><label>Type</label>
+              <select name="discount_type">
+                <option value="percent" ${c.discount_type==='percent'?'selected':''}>Pourcentage (%)</option>
+                <option value="fixed" ${c.discount_type==='fixed'?'selected':''}>Montant fixe (FCFA)</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Valeur</label><input type="number" name="discount_value" value="${c.discount_value}" required></div>
+          </div>
+          <div class="grid3">
+            <div class="form-group"><label>Début</label><input type="date" name="starts_at" value="${toInputDate(c.starts_at)}"></div>
+            <div class="form-group"><label>Fin</label><input type="date" name="ends_at" value="${toInputDate(c.ends_at)}"></div>
+            <div class="form-group"><label>Utilisations max (vide = illimité)</label><input type="number" name="max_uses" value="${c.max_uses || ''}"></div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" type="submit">Enregistrer</button>
+            <button class="btn btn-outline" type="button" onclick="toggleEdit(${c.id})">Annuler</button>
+          </div>
+        </form>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const body = `
+  ${flash}
+  <div class="card">
+    <h2 style="font-size:16px;margin:0 0 16px">Nouveau coupon</h2>
+    <form method="post" action="/admin/coupons">
+      <div class="grid3">
+        <div class="form-group"><label>Code (ex: PROMO20)</label><input name="code" required placeholder="PROMO20"></div>
+        <div class="form-group"><label>Type de remise</label>
+          <select name="discount_type">
+            <option value="percent">Pourcentage (%)</option>
+            <option value="fixed">Montant fixe (FCFA)</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Valeur (ex: 20 pour 20%)</label><input type="number" name="discount_value" required placeholder="20"></div>
+      </div>
+      <div class="grid3">
+        <div class="form-group"><label>Date début (optionnel)</label><input type="date" name="starts_at"></div>
+        <div class="form-group"><label>Date fin (optionnel)</label><input type="date" name="ends_at"></div>
+        <div class="form-group"><label>Max utilisations (vide = illimité)</label><input type="number" name="max_uses" placeholder="100"></div>
+      </div>
+      <button class="btn btn-primary" type="submit">Créer le coupon</button>
+    </form>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Code</th><th>Remise</th><th>Période</th><th>Utilisations</th><th>Statut</th><th>Actions</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <script>
+    function toggleEdit(id) {
+      const row = document.getElementById('edit-'+id);
+      row.style.display = row.style.display === 'table-row' ? 'none' : 'table-row';
+    }
+  </script>`;
+
+  res.send(adminPage('Coupons', 'coupons', body));
+});
+
+app.post('/admin/coupons', adminAuth, async (req, res) => {
+  const { code, discount_type, discount_value, starts_at, ends_at, max_uses } = req.body;
+  await query(
+    `INSERT INTO coupons (code, discount_type, discount_value, starts_at, ends_at, max_uses, active)
+     VALUES ($1,$2,$3,$4,$5,$6,TRUE)`,
+    [
+      code.trim().toUpperCase(),
+      discount_type,
+      Number(discount_value),
+      starts_at || null,
+      ends_at || null,
+      max_uses ? Number(max_uses) : null,
+    ]
+  );
+  res.redirect('/admin/coupons?flash=Coupon+créé');
+});
+
+app.post('/admin/coupons/:id', adminAuth, async (req, res) => {
+  const { code, discount_type, discount_value, starts_at, ends_at, max_uses } = req.body;
+  await query(
+    `UPDATE coupons SET code=$1, discount_type=$2, discount_value=$3, starts_at=$4, ends_at=$5, max_uses=$6 WHERE id=$7`,
+    [
+      code.trim().toUpperCase(),
+      discount_type,
+      Number(discount_value),
+      starts_at || null,
+      ends_at || null,
+      max_uses ? Number(max_uses) : null,
+      req.params.id,
+    ]
+  );
+  res.redirect('/admin/coupons?flash=Coupon+mis+à+jour');
+});
+
+app.post('/admin/coupons/:id/toggle', adminAuth, async (req, res) => {
+  await query(`UPDATE coupons SET active = NOT active WHERE id=$1`, [req.params.id]);
+  res.redirect('/admin/coupons?flash=Statut+modifié');
+});
+
+// ── ORDERS ────────────────────────────────────────────────────────────────────
+
+app.get('/admin/orders', adminAuth, async (req, res) => {
+  const status = req.query.status || '';
+  const search = req.query.search || '';
+  const page = Math.max(1, Number(req.query.page || 1));
+  const limit = 25;
+  const offset = (page - 1) * limit;
+
+  let where = [];
+  let params = [];
+  if (status) { params.push(status); where.push(`o.status=$${params.length}`); }
+  if (search) { params.push(`%${search}%`); where.push(`(o.customer_email ILIKE $${params.length} OR o.order_ref ILIKE $${params.length})`); }
+  const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+
+  const countRes = await query(`SELECT COUNT(*) FROM orders o ${whereClause}`, params);
+  const total = Number(countRes.rows[0].count);
+  const pages = Math.ceil(total / limit);
+
+  params.push(limit, offset);
+  const orders = await query(
+    `SELECT o.*, p.title AS product_title
+     FROM orders o JOIN products p ON p.id=o.product_id
+     ${whereClause}
+     ORDER BY o.created_at DESC
+     LIMIT $${params.length-1} OFFSET $${params.length}`,
+    params
+  );
+
+  const statusOptions = ['', 'pending', 'paid', 'enrolled', 'cancelled', 'failed'].map(s =>
+    `<option value="${s}" ${status===s?'selected':''}>${s||'Tous les statuts'}</option>`
+  ).join('');
+
+  const rows = orders.rows.map(o => `
+    <tr>
+      <td style="font-size:11px"><code>${escapeHtml(o.order_ref)}</code></td>
+      <td>${escapeHtml(o.customer_first_name)} ${escapeHtml(o.customer_last_name)}<br><small style="color:#64748b">${escapeHtml(o.customer_email)}</small></td>
+      <td>${escapeHtml(o.product_title)}</td>
+      <td style="white-space:nowrap">${Number(o.final_price_cents).toLocaleString('fr-FR')} ${escapeHtml(o.currency)}</td>
+      <td>${o.coupon_code ? `<span class="badge badge-blue">${escapeHtml(o.coupon_code)}</span>` : '–'}</td>
+      <td>${statusBadge(o.status)}</td>
+      <td style="white-space:nowrap;font-size:12px">${new Date(o.created_at).toLocaleString('fr-FR')}</td>
+    </tr>`).join('');
+
+  const pagination = pages > 1 ? `<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+    ${Array.from({length:pages},(_,i)=>`<a href="/admin/orders?page=${i+1}&status=${encodeURIComponent(status)}&search=${encodeURIComponent(search)}" class="btn btn-sm ${page===i+1?'btn-primary':'btn-outline'}">${i+1}</a>`).join('')}
+  </div>` : '';
+
+  const body = `
+  <form method="get" action="/admin/orders" style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+    <input name="search" value="${escapeHtml(search)}" placeholder="Email ou référence…" style="max-width:280px">
+    <select name="status" style="max-width:200px">${statusOptions}</select>
+    <button class="btn btn-primary" type="submit">Filtrer</button>
+    <a href="/admin/orders" class="btn btn-outline">Réinitialiser</a>
+  </form>
+  <div class="card">
+    <div style="margin-bottom:12px;font-size:14px;color:#64748b">${total} commande(s)</div>
+    <table>
+      <thead><tr><th>Référence</th><th>Client</th><th>Produit</th><th>Montant</th><th>Coupon</th><th>Statut</th><th>Date</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${pagination}
+  </div>`;
+
+  res.send(adminPage('Commandes', 'orders', body));
 });
 
 app.listen(PORT, '0.0.0.0', () => {
