@@ -227,7 +227,7 @@ app.get('/pay', async (req, res) => {
       currency: product.currency,
       env: PAYTECH_ENV,
       ipn_url: `${APP_BASE_URL}/paytech/ipn`,
-      success_url: `${SUCCESS_REDIRECT_URL}?order_ref=${encodeURIComponent(orderRef)}`,
+      success_url: `${SUCCESS_REDIRECT_URL}`,
       cancel_url: `${CANCEL_REDIRECT_URL}?order_ref=${encodeURIComponent(orderRef)}`,
       custom_field: JSON.stringify(customField),
     };
